@@ -1,0 +1,417 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Irrigation Dashboard</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 18px;
+  font-family: Arial, sans-serif;
+  background: #f2f5f9;
+  color: #172033;
+}
+
+header {
+  padding: 24px;
+  background: #164c3c;
+  color: white;
+  border-radius: 16px;
+}
+
+header h1 { margin-top: 0; }
+header p { color: #dcece5; }
+
+.setup, .card, .status-box, .chart {
+  background: white;
+  border: 1px solid #e0e6ed;
+  border-radius: 13px;
+  padding: 16px;
+}
+
+.setup { margin-top: 16px; }
+
+input {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  margin: 7px 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+button {
+  padding: 11px 16px;
+  background: #176b54;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+#message {
+  margin-top: 12px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+h2 { margin: 26px 0 14px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.card h3 {
+  margin: 0 0 14px;
+  color: #657287;
+  font-size: 14px;
+}
+
+.value {
+  font-size: 27px;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.unit {
+  color: #657287;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.badge {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: #edf1f5;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.good { background: #d9f5e5; color: #17643b; }
+.warn { background: #fff0ce; color: #835500; }
+.bad { background: #ffe2df; color: #9c2828; }
+
+.status-box {
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+}
+
+.chart { min-width: 0; padding: 10px; }
+.chart h3 { font-size: 15px; margin: 5px 4px 12px; }
+
+iframe {
+  display: block;
+  width: 100%;
+  height: 260px;
+  border: 0;
+}
+
+footer {
+  margin-top: 22px;
+  color: #657287;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 480px) {
+  body { padding: 10px; }
+  header { padding: 17px; }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>Smart Irrigation Dashboard</h1>
+  <p>Low-Power RISC-V Agricultural IoT Monitoring System</p>
+  <div id="connection">Not connected yet</div>
+</header>
+
+<div class="setup">
+  <h3>Connect ThingSpeak Channel</h3>
+
+  <label for="channelId">Channel ID</label>
+  <input id="channelId" placeholder="Enter your channel ID">
+
+  <label for="readKey">Read API Key</label>
+  <input id="readKey" type="password"
+         placeholder="Required for a private channel">
+
+  <button onclick="connectChannel()">Connect Channel</button>
+  <div id="message">Enter your channel details above.</div>
+</div>
+
+<h2>Latest Sensor Readings</h2>
+
+<div class="grid">
+
+  <div class="card">
+    <h3>Soil Moisture</h3>
+    <div class="value" id="soil">--</div>
+    <div class="unit">Raw sensor reading (ADC)</div>
+    <span id="soilBadge" class="badge">Waiting for data</span>
+  </div>
+
+  <div class="card">
+    <h3>Temperature</h3>
+    <div class="value" id="temperature">--</div>
+    <div class="unit">°C</div>
+  </div>
+
+  <div class="card">
+    <h3>Humidity</h3>
+    <div class="value" id="humidity">--</div>
+    <div class="unit">%</div>
+  </div>
+
+  <div class="card">
+    <h3>Water Quality</h3>
+    <div class="value" id="water">--</div>
+    <div class="unit">Reported sensor value</div>
+  </div>
+
+
+  <div class="card">
+    <h3>Pump Status</h3>
+    <div class="value" id="pump">--</div>
+    <div class="unit">Status reported by controller</div>
+    <span id="pumpBadge" class="badge">Waiting for data</span>
+  </div>
+
+
+
+</div>
+
+<h2>System Status</h2>
+
+<div class="status-box">
+  <div><strong>Soil condition:</strong>
+    <span id="soilText">Waiting for readings.</span>
+  </div>
+
+  <div><strong>Pump report:</strong>
+    <span id="pumpText">Waiting for readings.</span>
+  </div>
+
+  <div><strong>Last update:</strong>
+    <span id="lastUpdate">--</span>
+  </div>
+</div>
+
+<h2>Sensor History and Graphs</h2>
+<div class="charts" id="charts"></div>
+
+<footer>
+  Dashboard values are read from ThingSpeak. The latest sensor cards refresh every 3 seconds;
+  actual values can change only after the ESP32 writes a new reading to ThingSpeak.
+  Pump status is the controller-reported value in Field 6 and does not confirm physical water flow.
+</footer>
+
+<script>
+let channel = "";
+let apiKey = "";
+let refreshTimer = null;
+let chartRefreshTimer = null;
+
+const fields = [
+  [1, "Soil Moisture"],
+  [2, "Temperature"],
+  [3, "Humidity"],
+  [4, "Water Quality"],
+  [6, "Pump Status"]
+];
+
+// Based on the soil readings you previously observed.
+const DRY_THRESHOLD = 2700;
+const WET_THRESHOLD = 2200;
+
+function display(id, value, suffix = "") {
+  const el = document.getElementById(id);
+
+  if (value === null || value === undefined || value === "") {
+    el.textContent = "--";
+  } else {
+    el.textContent = value + suffix;
+  }
+}
+
+function setBadge(id, text, style = "") {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = "badge " + style;
+}
+
+function connectChannel() {
+  channel = document.getElementById("channelId").value.trim();
+  apiKey = document.getElementById("readKey").value.trim();
+
+  if (!/^\d+$/.test(channel)) {
+    document.getElementById("message").textContent =
+      "Please enter a valid numeric Channel ID.";
+    return;
+  }
+
+  if (refreshTimer) clearInterval(refreshTimer);
+  if (chartRefreshTimer) clearInterval(chartRefreshTimer);
+
+  createCharts();
+  loadLatestData();
+
+  // Poll the latest readings frequently; ThingSpeak itself updates only when the ESP32 writes.
+  refreshTimer = setInterval(loadLatestData, 3000);
+  // Refresh embedded history graphs less often to avoid repeatedly reloading many iframes.
+  chartRefreshTimer = setInterval(createCharts, 30000);
+}
+
+async function loadLatestData() {
+  try {
+    let url =
+      "https://api.thingspeak.com/channels/" +
+      encodeURIComponent(channel) +
+      "/feeds/last.json";
+
+    url += "?t=" + Date.now();
+    if (apiKey) {
+      url += "&api_key=" + encodeURIComponent(apiKey);
+    }
+
+    const response = await fetch(url, { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error("Unable to read channel. Check your channel ID and key.");
+    }
+
+    const data = await response.json();
+
+    if (!data.created_at) {
+      throw new Error("No readings found. Send data to this channel first.");
+    }
+
+    display("soil", data.field1);
+    display("temperature", data.field2);
+    display("humidity", data.field3);
+    display("water", data.field4);
+
+    updateSoil(data.field1);
+    updatePump(data.field6);
+
+    document.getElementById("lastUpdate").textContent =
+      new Date(data.created_at).toLocaleString();
+
+    document.getElementById("connection").textContent =
+      "Connected to ThingSpeak";
+
+    document.getElementById("message").textContent =
+      "Latest readings loaded successfully.";
+  } catch (error) {
+    document.getElementById("connection").textContent =
+      "Connection or data error";
+
+    document.getElementById("message").textContent = error.message;
+  }
+}
+
+function updateSoil(rawValue) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") {
+    setBadge("soilBadge", "No soil data");
+    document.getElementById("soilText").textContent =
+      "The soil sensor reading is missing.";
+    return;
+  }
+
+  const soil = Number(rawValue);
+
+  if (!Number.isFinite(soil)) {
+    setBadge("soilBadge", "Invalid reading");
+    document.getElementById("soilText").textContent =
+      "The soil reading is not numeric.";
+  } else if (soil > DRY_THRESHOLD) {
+    setBadge("soilBadge", "DRY", "warn");
+    document.getElementById("soilText").textContent =
+      "Raw reading is above " + DRY_THRESHOLD + " (classified as dry).";
+  } else if (soil < WET_THRESHOLD) {
+    setBadge("soilBadge", "WET", "good");
+    document.getElementById("soilText").textContent =
+      "Raw reading is below " + WET_THRESHOLD + " (classified as wet).";
+  } else {
+    setBadge("soilBadge", "INTERMEDIATE");
+    document.getElementById("soilText").textContent =
+      "Reading is between " + WET_THRESHOLD + " and " +
+      DRY_THRESHOLD + ".";
+  }
+}
+
+function updatePump(value) {
+  const status = String(value ?? "").trim().toUpperCase();
+
+  if (["1", "ON", "TRUE"].includes(status)) {
+    display("pump", "ON");
+    setBadge("pumpBadge", "Reported ON", "good");
+    document.getElementById("pumpText").textContent =
+      "The controller reports that the pump command is ON.";
+  } else if (["0", "OFF", "FALSE"].includes(status)) {
+    display("pump", "OFF");
+    setBadge("pumpBadge", "Reported OFF", "bad");
+    document.getElementById("pumpText").textContent =
+      "The controller reports that the pump command is OFF.";
+  } else {
+    display("pump", value);
+    setBadge("pumpBadge", "Unknown status");
+    document.getElementById("pumpText").textContent =
+      "Check the format sent to ThingSpeak Field 6.";
+  }
+}
+
+function createCharts() {
+  const holder = document.getElementById("charts");
+  holder.innerHTML = "";
+
+  fields.forEach(([field, title]) => {
+    const card = document.createElement("div");
+    card.className = "chart";
+
+    const heading = document.createElement("h3");
+    heading.textContent = title + " History";
+
+    const frame = document.createElement("iframe");
+    frame.title = title + " graph";
+    frame.loading = "lazy";
+
+    let url =
+      "https://thingspeak.com/channels/" +
+      encodeURIComponent(channel) +
+      "/charts/" + field +
+      "?dynamic=true&results=60&type=line&width=auto";
+
+    if (apiKey) {
+      url += "&api_key=" + encodeURIComponent(apiKey);
+    }
+
+    frame.src = url;
+
+    card.appendChild(heading);
+    card.appendChild(frame);
+    holder.appendChild(card);
+  });
+}
+</script>
+
+</body>
+</html>
